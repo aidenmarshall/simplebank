@@ -115,8 +115,8 @@ Section 1 of [Woring with database](/M50RMDDUS7WN3uDwrZ45lg)
 
         Table transfers {
           id bigserial [pk]
-          from_account_id bigint [ref: > A.id]
-          to_account_id bigint [ref: > A.id]
+          from_account_id bigint [not null, ref: > A.id]
+          to_account_id bigint [not null, ref: > A.id]
           amount bigint [not null, note: 'must be positive']
           created_at timestamptz [not null, default: `now()`]
           Indexes {
