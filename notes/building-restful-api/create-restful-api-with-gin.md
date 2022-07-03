@@ -284,3 +284,122 @@ This time we’ve got a 404 Not Found status code, and an error: sql no rows in 
 Now we got a 400 Bad Request status code with an error message about the failed validation.
 
 Alright, so our getAccount API is working well.
+
+### Implement list account API
+Next step, I’m gonna show you how to implement a list account API with `pagination`.
+
+The number of accounts stored in our database can grow to a very big number over time. Therefore, we should not query and return all of them in a single API call.
+
+The idea of `pagination` is to divide the records into multiple pages of small size, so that the client can retrieve only 1 page per API request.
+
+This API is a bit different because we will not get input parameters from request body or URI, but we will get them from `query string` instead.
+
+* We have a `page_id` param, which is the index number of the page we want to get, starting from page 1. 
+* And a `page_size` param, which is the maximum number of records can be returned in 1 page.
+
+As you can see, the page_id and page_size are added to the request URL after a question mark:
+```
+http://localhost:8080/accounts?page_id=1&page_size=5.
+```
+That’s why they’re called query parameters, and not URI parameter like the account ID in the get account request.
+
+OK, now let’s go back to our code. I’m gonna add a new route with the same `GET` method. But this time, the path should be `/accounts` only, since we’re gonna get the parameters from the query. The handler’s name should be `listAccount`.
+
+let’s open the account.go file to implement this server.listAccount function.
+```go
+type listAccountRequest struct {
+    PageID   int32 `form:"page_id" binding:"required,min=1"`
+    PageSize int32 `form:"page_size" binding:"required,min=5,max=10"`
+    }
+```
+
+This struct should store 2 parameters, PageID and PageSize. 
+
+- Now note that we’re not getting these parameters from uri, but from query string instead, so we cannot use the uri tag. 
+    - Instead, we should use form tag.
+- Both parameters are required and the minimum PageID should be 1. 
+    - For the PageSize, let’s say we don’t want it to be too big or too small, so I set its minimum constraint to be 5 records, and maximum constraint to be 10 records.
+
+```go
+func (server *Server) listAccount(ctx *gin.Context) {
+    var req listAccountRequest
+    if err := ctx.ShouldBindQuery(&req); err != nil {
+        ctx.JSON(http.StatusBadRequest, errorResponse(err))
+        return
+    }
+
+    arg := db.ListAccountsParams{
+        Limit:  req.PageSize,
+        Offset: (req.PageID - 1) * req.PageSize,
+    }
+
+    accounts, err := server.store.ListAccounts(ctx, arg)
+    if err != nil {
+        ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+        return
+    }
+
+    ctx.JSON(http.StatusOK, accounts)
+}
+```
+
+The req variable’s type should be listAccountRequest. Then we use another binding function: ShouldBindQuery to tell Gin to get data from query string.
+
+If an error occurs, we just return a 400 Bad Request status. Else, we call server.store.ListAccounts() to query a page of account records from the database. This function requires a ListAccountsParams as input, where we have to provide values for 2 fields: Limit and Offset.
+
+Limit is simply the req.PageSize. While Offset is the number of records that the database should skip, wo we have to calculate it from the page id and page size using this formula: (req.PageID - 1) * req.PageSize
+
+The ListAccounts function returns a list of accounts and an error. If an error occurs, then we just need to return 500 Internal Server Error to the client. Otherwise, we send a 200 OK status code with the output accounts list.
+
+And that’s it, the ListAccount API is done.
+
+#### Test list account API with Postman
+![](https://i.imgur.com/is3i3AE.png)
+- Let’s try to get the second page.
+- try one more time to get a page that doesn’t exist, let’s say page 100.
+![](https://i.imgur.com/pUCQeMR.png)
+it would be better if the server returns an empty list in this case.
+
+#### Return empty list instead of null
+in the account.sql.go file that sqlc has generated for us
+![](https://i.imgur.com/QIufDK0.png)
+
+We can see that the Account items variable is declared without being initialized: var items []Account. That’s why it will remain null if no records are added.
+
+##### emit_empty_slices
+Lucky for us, in the latest released of sqlc, which is version 1.5.0, we have a new setting that will instruct sqlc to create an empty slice instead of null.
+
+The setting is called emit_empty_slices, and its default value is false. If we set this value to true, then the result returned by a many query will be an empty slice.
+
+OK, so now let’s add this new setting to our sqlc.yaml file:
+
+```
+version: "1"
+packages:
+  - name: "db"
+    path: "./db/sqlc"
+    queries: "./db/query/"
+    schema: "./db/migration/"
+    engine: "postgresql"
+    emit_json_tags: true
+    emit_prepared_queries: false
+    emit_interface: false
+    emit_exact_table_names: false
+    emit_empty_slices: true
+```
+
+```
+make sqlc
+```
+
+![](https://i.imgur.com/uCFkMxQ.png)
+
+#### Test list account API with Postman (2)
+try some invalid parameters
+- change page_size to 20, which is bigger than the maximum constraint of 10.
+- try one more time with page_id = 0
+    - Now we still got `400` Bad Request status, but the error is because page_id validation failed on the required tag.![](https://i.imgur.com/IKRXnd4.png)
+
+    - What happens here is, in the validator package, any zero-value will be recognized as missing. It’s acceptable in this case because we don’t want to have the 0 page, anyway.
+
+However, if your API has a `zero value` parameter, then you need to pay attention to this. I recommend you to read the [documentation of validator package](https://godoc.org/github.com/go-playground/validator) to learn more about it.
