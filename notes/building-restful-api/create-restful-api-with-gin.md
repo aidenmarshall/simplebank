@@ -209,3 +209,78 @@ Yee, it’s successful. We’ve got a 200 OK status code, and the created accoun
 ![](https://i.imgur.com/02CASjv.png)
 
 It’s really great how Gin has handled all the input binding and validation for us with just a few lines of code. It also prints out a nice form of request logs, which is very easy to read for human eyes.
+
+## 5. implement other APIs
+### Implement get account API
+```go
+func NewServer(store *db.Store) *Server {
+    ...
+
+    router.POST("/accounts", server.createAccount)
+    router.GET("/accounts/:id", server.getAccount)
+
+    ...
+}
+```
+
+Here instead of POST, we will use GET method. And this path should include the id of the account we want to get /accounts/:id. Note that we have a colon before the id. It’s how we tell Gin that id is a URI parameter.
+
+```go
+type getAccountRequest struct {
+    ID int64 `uri:"id" binding:"required,min=1"`
+}
+```
+Now, since ID is a `URI` parameter, we cannot get it from the request body as before.
+
+Instead, we use the `uri tag` to tell Gin the name of the URI parameter.
+
+In this case, let’s set `min = 1`, because it’s the smallest possible value of account ID.
+
+```go
+func (server *Server) getAccount(ctx *gin.Context) {
+    var req getAccountRequest
+    if err := ctx.ShouldBindUri(&req); err != nil {
+        ctx.JSON(http.StatusBadRequest, errorResponse(err))
+        return
+    }
+
+    account, err := server.store.GetAccount(ctx, req.ID)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            ctx.JSON(http.StatusNotFound, errorResponse(err))
+            return
+        }
+
+        ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+        return
+    }
+
+    ctx.JSON(http.StatusOK, account)
+}
+```
+- we declare a new req variable of type getAccountRequest. Then here instead of ShouldBindJSON, we should call `ShouldBindUri`.
+
+- If there’s an error, we just return a 400 Bad Request status code. Otherwise, we call `server.store.GetAccount()` to get the account with ID equals to `req.ID`. This function will return an account and an error.
+
+If error is not nil, then there are 2 possible scenarios.
+
+* The first scenario is some internal error when querying data from the database. In this case, we just return 500 Internal Server Error status code to the client.
+* The second scenario is when the account with that specific input ID doesn’t exist. In that case, the error we got should be a sql.ErrNoRows. So we just check it here, and if it’s really the case, we simply send a 404 Not Found status code to the client, and return.
+
+#### Test get account API with Postman
+Let’s add a new request with method GET, and the URL is http://localhost:8080/accounts/1. We add a /1 at the end because we want to get the account with ID = 1. Now click send:
+![](https://i.imgur.com/GoSHd6e.png)
+
+
+The request is successful, and we’ve got a 200 OK status code together with the found account. This is exactly the account that we’ve created before.
+![](https://i.imgur.com/Cn3npzY.png)
+
+##### Try to get an account that doesn't exist.
+![](https://i.imgur.com/RgxU4U1.png)
+This time we’ve got a 404 Not Found status code, and an error: sql no rows in result set. Exactly what we expected
+
+##### Try get account with a negative ID
+![](https://i.imgur.com/egnVKJq.png)
+Now we got a 400 Bad Request status code with an error message about the failed validation.
+
+Alright, so our getAccount API is working well.
