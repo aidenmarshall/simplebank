@@ -53,6 +53,16 @@ func TestGetAccountAPI(t *testing.T) {
 				require.Equal(t, http.StatusNotFound, recorder.Code)
 			},
 		},
+		{
+			name:      "InvalidID",
+			accountID: -1,
+			buildStubs: func(store *mockdb.MockStore) {
+				store.EXPECT().GetAccount(gomock.Any(), gomock.Any()).Times(0)
+			},
+			checkResponse: func(t *testing.T, recoder *httptest.ResponseRecorder) {
+				require.Equal(t, http.StatusBadRequest, recoder.Code)
+			},
+		},
 	}
 
 	for i := range testCases {
