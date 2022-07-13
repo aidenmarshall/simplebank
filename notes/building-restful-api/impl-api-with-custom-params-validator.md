@@ -181,3 +181,90 @@ use Postman to test the new transfer money API.
     }
 }
 ```
+# Implement a custom currency validator
+Here, in the binding condition of the currency field, we’re hard-coding 3 constants for USD, EUR and CAD.
+- What if in the future we want to support 100 different types of currency?
+- Also, there will be duplications because the currency parameter can appear in many different APIs.
+
+The solution is to write a custom validator
+
+```go=
+package api
+
+import (
+	"github.com/aidenmarshall/simplebank/util"
+	"github.com/go-playground/validator/v10"
+)
+
+var validCurrency validator.Func = func(fieldLevel validator.FieldLevel) bool {
+    if currency, ok := fieldLevel.Field().Interface().(string); ok {
+        return util.IsSupportedCurrency(currency)
+    }
+    return false
+}
+
+```
+
+Basically, `validator.Func` is a function that takes a `validator.FieldLevel` interface as input and return true when validation succeeds.
+- This is an interface that contains all information and helper functions to validate a field.
+
+What we need to do is calling `fieldLevel.Field()` to get the value of the field.
+1. it’s a reflection value, so we have to call .Interface() to get its value as an interface{}.
+2. Then we try to convert this value to a string.
+3. The conversion will return a currency string and a ok boolean value. If ok is true then the currency is a `valid string`.
+
+## implement the function `IsSupportedCurrency()`
+check if a currency is supported or not in this file
+
+```go=
+package util
+
+// Constants for all supported currencies
+const (
+    USD = "USD"
+    EUR = "EUR"
+    CAD = "CAD"
+)
+
+// IsSupportedCurrency returns true if the currency is supported
+func IsSupportedCurrency(currency string) bool {
+    switch currency {
+    case USD, EUR, CAD:
+        return true
+    }
+    return false
+}
+```
+
+# Register the custom currency validator
+```go=
+func NewServer(store db.Store) *Server {
+    server := &Server{store: store}
+    router := gin.Default()
+
+    if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+        v.RegisterValidation("currency", validCurrency)
+    }
+```
+
+Here, after creating the Gin router, we call `binding.Validator.Engine()`
+to get the current `validator engine` that Gin is using (binding is a sub-package of Gin).
+
+1. Note that this function will return a general interface type, which by default is a pointer to the validator object of the go-playground/validator/v10 package.
+
+2. So here we have to convert the output to a validator.Validate object pointer. If it is ok then we can call v.RegisterValidation() to register our custom validate function.
+
+# Use the custom currency validator
+```go=
+type createAccountRequest struct {
+    Owner    string `json:"owner" binding:"required"`
+    Currency string `json:"currency" binding:"required,currency"`
+}
+```
+Here in the createAccountRequest struct, we can replace the `oneof=USD EUR CAD` tag with just `currency` tag
+
+## try to pass an invalid currency
+![](https://i.imgur.com/GnSy7Hj.png)
+This is a valid supported currency, but it doesn’t match the currency of the accounts, so we’ve got a 400 Bad Request status with the currency mismatch error.
+![](https://i.imgur.com/XtvGFHV.png)
+This time, we also get 400 Bad Request status, but the error is because the field validation for the currency failed on the currency tag, which is exactly what we expected.
