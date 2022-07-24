@@ -129,3 +129,135 @@ require.NoError(t, err)
 require.NotEmpty(t, hashedPassword2)
 require.NotEqual(t, hashedPassword1, hashedPassword2)
 ```
+
+# Implement the create user API
+use the HashPassword() function that we’ve written to implement the create user API
+
+## createUserRequest struct
+```go
+type createUserRequest struct {
+    Username string `json:"username" binding:"required,alphanum"`
+    Password string `json:"password" binding:"required,min=6"`
+    FullName string `json:"full_name" binding:"required"`
+    Email    string `json:"email" binding:"required,email"`
+}
+```
+
+Use useful tags implemented by the validator package
+- `alphanum` tag
+    -  It basically means that this field should contain ASCII alphanumeric characters only.
+
+- `min` tag
+    - to say the length of the password should be at least 6 characters.
+
+- `email` tag
+    - use the email tag provided by validator package to make sure that the value of this field is a correct email address.
+
+## complete the `createUser()` function
+```go
+func (server *Server) createUser(ctx *gin.Context) {
+    var req createUserRequest
+    if err := ctx.ShouldBindJSON(&req); err != nil {
+        ctx.JSON(http.StatusBadRequest, errorResponse(err))
+        return
+    }
+
+    hashedPassword, err := util.HashPassword(req.Password)
+    if err != nil {
+        ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+        return
+    }
+
+    arg := db.CreateUserParams{
+        Username:       req.Username,
+        HashedPassword: hashedPassword,
+        FullName:       req.FullName,
+        Email:          req.Email,
+    }
+
+    ...   
+}
+```
+
+we compute the hashedPassword by calling util.HashPassword() function and pass in the input request.Password value.
+
+### call server.store.CreateUser()
+```go
+func (server *Server) createUser(ctx *gin.Context) {
+    ...
+
+    user, err := server.store.CreateUser(ctx, arg)
+    if err != nil {
+        if pqErr, ok := err.(*pq.Error); ok {
+            switch pqErr.Code.Name() {
+            case "unique_violation":
+                ctx.JSON(http.StatusForbidden, errorResponse(err))
+                return
+            }
+        }
+        ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+        return
+    }
+
+    ctx.JSON(http.StatusOK, user)
+}
+```
+
+In the users table, since we have 2 unique constraints:
+
+- One is for the primary key username,
+- And the other is for the email column.
+
+, we need to handle `unique_violation` error.
+
+Return status `403` in case an user with the same username or email already exists.
+
+### resiter a route for `createUser` API handler
+
+# API should not expose hashed password
+The hashed_password value is also returned.
+
+It would be better to remove this field from the response body.
+
+## declare a new createUserResponse struct
+
+It will contain almost all fields of the db.User struct, except for the HashedPassword field that should be removed.
+```go
+type createUserResponse struct {
+    Username          string    `json:"username"`
+    FullName          string    `json:"full_name"`
+    Email             string    `json:"email"`
+    PasswordChangedAt time.Time `json:"password_changed_at"`
+    CreatedAt         time.Time `json:"created_at"`
+}
+```
+
+Finally, we return the response object instead of user. And we’re done.
+
+```go
+func (server *Server) createUser(ctx *gin.Context) {
+    ...
+
+    user, err := server.store.CreateUser(ctx, arg)
+    if err != nil {
+        if pqErr, ok := err.(*pq.Error); ok {
+            switch pqErr.Code.Name() {
+            case "unique_violation":
+                ctx.JSON(http.StatusForbidden, errorResponse(err))
+                return
+            }
+        }
+        ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+        return
+    }
+
+    rsp := createUserResponse{
+        Username:          user.Username,
+        FullName:          user.FullName,
+        Email:             user.Email,
+        PasswordChangedAt: user.PasswordChangedAt,
+        CreatedAt:         user.CreatedAt,
+    }
+    ctx.JSON(http.StatusOK, rsp)
+}
+```
