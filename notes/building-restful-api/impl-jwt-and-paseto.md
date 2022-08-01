@@ -116,3 +116,45 @@ Then inside this function, we check if the length of the secret key is less than
 Otherwise, we return a new JWTMaker object with the input secretKey, and a nil error.
 
 ## add the `CreateToken()` and `VerifyToken()` methods
+```go
+func (maker *JWTMaker) CreateToken(username string, duration time.Duration) (string, error) {}
+
+func (maker *JWTMaker) VerifyToken(token string) (*Payload, error) {}
+```
+
+### Implement the `CreateToken()`
+1. Create a new token payload by calling `NewPayload()`, and pass in the input username and valid duration.
+2. If error is not nil, we return an empty token string and the error.
+3. Create a new jwtToken by calling the `jwt.NewWithClaims()` function of the jwt-go package.
+    - This function expects 2 input arguments:
+        1. the signing method (or algorithm). I’m gonna use HS256 in this case.
+        2. the claims, which actually is our created payload.
+
+4. To generate a token string, we call jwtToken.SignedString(), and pass in the secretKey after converting it to []byte slice.
+
+#### Implement `Valid()` for `jwt.Claims` interface
+
+Here we have an error because our Payload struct doesn’t implement the jwt.Claims interface. It’s missing one method called Valid().
+
+The jwt-go package needs this method to check if the token payload is valid or not. So let’s open the payload.go to add this method.
+
+```go
+var ErrExpiredToken = errors.New("token has expired")
+
+func (payload *Payload) Valid() error {
+    if time.Now().After(payload.ExpiredAt) {
+        return ErrExpiredToken
+    }
+    return nil
+}
+```
+
+The simplest but also the most important thing we must check is the expiration time of the token.
+
+If time.Now() is after the payload.ExpiredAt, then it means that the token has expired. So we just return a new error saying: token has expired.
+
+We should declare this error as a public constant: ErrExpiredToken, so that we can check the error type from outside.
+
+If the token is not expired, then we simply return nil. And that’s it! The Valid function is done.
+
+#### Implement the JWT VerifyToken method
