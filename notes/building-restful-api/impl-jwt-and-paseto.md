@@ -158,3 +158,34 @@ We should declare this error as a public constant: ErrExpiredToken, so that we c
 If the token is not expired, then we simply return nil. And that’s it! The Valid function is done.
 
 #### Implement the JWT VerifyToken method
+we have to parse the token by calling jwt.ParseWithClaims and pass in the input token string, an empty Payload object, and a `key function`.
+
+##### Key function
+it’s a function that receives the parsed but unverified token.
+
+You should verify its header to make sure that the signing algorithm matches with what you normally use to sign the tokens.
+
+Then if it matches, you return the key so that jwt-go can use it to verify the token.
+
+`This step is very important to prevent the trivial attack mechanism`
+
+we can get its signing algorithm via the token.Method field. 
+```go=
+keyFunc := func(token *jwt.Token) (interface{}, error) {
+    _, ok := token.Method.(*jwt.SigningMethodHMAC)
+    if !ok {
+        return nil, ErrInvalidToken
+    }
+    return []byte(maker.secretKey), nil
+}
+```
+- Note that its type is a SigningMethod, which is just an interface. So we have to try converting it to a specific implementation.
+
+
+##### declare error
+```go
+var (
+    ErrInvalidToken = errors.New("token is invalid")
+    ErrExpiredToken = errors.New("token has expired")
+)
+```
