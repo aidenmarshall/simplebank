@@ -189,3 +189,67 @@ var (
     ErrExpiredToken = errors.New("token has expired")
 )
 ```
+
+But now things get more complicated when we want to differentiate these 2 cases. If we follow the implementation of the jwt-go package, we can see that it automatically calls token.Claims.Valid() function under the hood.
+
+And in our implementation of this function, we’re returning ErrExpiredToken error. However, jwt-go has secretly hiden this original error inside its own ValidationError object.
+
+So in order to figure out the real error type, we have to convert the returned error of the ParseWithClaims() function to jwt.ValidationError
+
+```go=
+func (maker *JWTMaker) VerifyToken(token string) (*Payload, error) {
+    ...
+
+    jwtToken, err := jwt.ParseWithClaims(token, &Payload{}, keyFunc)
+    if err != nil {
+        verr, ok := err.(*jwt.ValidationError)
+        if ok && errors.Is(verr.Inner, ErrExpiredToken) {
+            return nil, ErrExpiredToken
+        }
+        return nil, ErrInvalidToken
+    }
+
+    ...
+}
+```
+
+Here I assign the converted error to the verr variable. If the conversion is OK, we use the errors.Is() function to check if the verr.Inner is actually the ErrExpiredToken or not.
+
+If it is, we just return a nil payload and the ErrExpiredToken. Otherwise, we just return nil and ErrInvalidToken.
+
+In case everything is good, and the token is successfully parsed and verified, we will try to get its payload data by converting jwtToken.Claims into a Payload object.
+
+```go=
+func (maker *JWTMaker) VerifyToken(token string) (*Payload, error) {
+    keyFunc := func(token *jwt.Token) (interface{}, error) {
+        _, ok := token.Method.(*jwt.SigningMethodHMAC)
+        if !ok {
+            return nil, ErrInvalidToken
+        }
+        return []byte(maker.secretKey), nil
+    }
+
+    jwtToken, err := jwt.ParseWithClaims(token, &Payload{}, keyFunc)
+    if err != nil {
+        verr, ok := err.(*jwt.ValidationError)
+        if ok && errors.Is(verr.Inner, ErrExpiredToken) {
+            return nil, ErrExpiredToken
+        }
+        return nil, ErrInvalidToken
+    }
+
+    payload, ok := jwtToken.Claims.(*Payload)
+    if !ok {
+        return nil, ErrInvalidToken
+    }
+
+    return payload, nil
+    }
+```
+
+If it’s not OK, then we just return nil and ErrInvalidToken. Else, we return the payload object and a nil error.
+
+And that’s it! The JWTMaker is completed. Now let’s write some unit test for it!
+
+# Others
+[claims](https://jwt.io/introduction#:~:text=Claims%20are%20statements%20about%20an%20entity%20(typically%2C%20the%20user)%20and%20additional%20data.)
