@@ -317,5 +317,97 @@ func TestInvalidJWTTokenAlgNone(t *testing.T) {
     require.Nil(t, payload)
 }
 ```
+
+# Implement PASETO Maker
+```go
+type PasetoMaker struct {
+	paseto    *pvx.ProtoV4Local
+	secretKey *pvx.SymKey
+}
+```
+
+create the NewSymmetricKey function with key Material to create symmetricKey
+
+```go
+func NewPasetoMaker(keyMaterial string) (Maker, error) {
+	pasetoMaker := PasetoMaker{
+		paseto:    pvx.NewPV4Local(),
+		secretKey: pvx.NewSymmetricKey([]byte(keyMaterial), pvx.Version4),
+	}
+
+	return &pasetoMaker, nil
+}
+```
+
+## Implement PASETO CreateToken method
+```
+func (maker *PasetoMaker) CreateToken(username string, duration time.Duration) (string, error) {
+	payload, err := NewPayload(username, duration)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(*maker.secretKey)
+	return maker.paseto.Encrypt(maker.secretKey, payload)
+}
+```
+
+payload must be `Claims` type
+Our claims type needs to implement the `Vaild` function
+
+pvx library uses Vaild function before parsing claims data in the `ScanClaims` function
+## Implement PASETO VerifyToken method
+```go
+func (maker *PasetoMaker) VerifyToken(token string) (*Payload, error) {
+	payload := Payload{}
+	err := maker.paseto.Decrypt(token, maker.secretKey).ScanClaims(&payload)
+	if err != nil {
+		return nil, err
+	}
+	return &payload, nil
+}
+```
+## test Paseto Maker
+It's similar to the one we wrote for JWT.
+```go
+func TestPasetoMaker(t *testing.T) {
+	maker, err := NewPasetoMaker(util.RandomString(32))
+	require.NoError(t, err)
+
+	username := util.RandomOwner()
+	duration := time.Minute
+
+	issuedAt := time.Now()
+	expiredAt := issuedAt.Add(duration)
+
+	token, err := maker.CreateToken(username, duration)
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	payload, err := maker.VerifyToken(token)
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	require.NotZero(t, payload.ID)
+	require.Equal(t, username, payload.Username)
+	require.WithinDuration(t, issuedAt, payload.IssuedAt, time.Second)
+	require.WithinDuration(t, expiredAt, payload.ExpiredAt, time.Second)
+}
+
+func TestExpiredPasetoToken(t *testing.T) {
+	maker, err := NewPasetoMaker(util.RandomString(32))
+	require.NoError(t, err)
+
+	token, err := maker.CreateToken(util.RandomOwner(), -time.Minute)
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	payload, err := maker.VerifyToken(token)
+	require.Error(t, err)
+	require.EqualError(t, err, ErrExpiredToken.Error())
+	require.Nil(t, payload)
+}
+```
+But now we don’t need the last test because the None algorithm just doesn’t exist in PASETO.
+
 # Others
 [claims](https://jwt.io/introduction#:~:text=Claims%20are%20statements%20about%20an%20entity%20(typically%2C%20the%20user)%20and%20additional%20data.)
