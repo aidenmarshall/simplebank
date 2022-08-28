@@ -251,5 +251,71 @@ If it’s not OK, then we just return nil and ErrInvalidToken. Else, we return t
 
 And that’s it! The JWTMaker is completed. Now let’s write some unit test for it!
 
+# Test JWT Maker
+## Happy case
+```go
+func TestJWTMaker(t *testing.T) {
+    maker, err := NewJWTMaker(util.RandomString(32))
+    require.NoError(t, err)
+
+    username := util.RandomOwner()
+    duration := time.Minute
+
+    issuedAt := time.Now()
+    expiredAt := issuedAt.Add(duration)
+
+    token, err := maker.CreateToken(username, duration)
+    require.NoError(t, err)
+    require.NotEmpty(t, token)
+
+    payload, err := maker.VerifyToken(token)
+    require.NoError(t, err)
+    require.NotEmpty(t, token)
+
+    require.NotZero(t, payload.ID)
+    require.Equal(t, username, payload.Username)
+    require.WithinDuration(t, issuedAt, payload.IssuedAt, time.Second)
+    require.WithinDuration(t, expiredAt, payload.ExpiredAt, time.Second)
+}
+```
+* First the payload.ID should be not zero.
+* Then the payload.Username should equal to the input username.
+* We use require.WithinDuration to compare the payload.IssuedAt field with the expected issuedAt time we saved above. They should not be different by more than 1 second.
+* Likewise, we compare the payload.ExpiredAt field with the expected expiredAt time in the same manner.
+## test Expired token
+```go
+func TestExpiredJWTToken(t *testing.T) {
+    maker, err := NewJWTMaker(util.RandomString(32))
+    require.NoError(t, err)
+
+    token, err := maker.CreateToken(util.RandomOwner(), -time.Minute)
+    require.NoError(t, err)
+    require.NotEmpty(t, token)
+
+    payload, err := maker.VerifyToken(token)
+    require.Error(t, err)
+    require.EqualError(t, err, ErrExpiredToken.Error())
+    require.Nil(t, payload)
+}
+```
+## test token with invalid alg
+```
+func TestInvalidJWTTokenAlgNone(t *testing.T) {
+    payload, err := NewPayload(util.RandomOwner(), time.Minute)
+    require.NoError(t, err)
+
+    jwtToken := jwt.NewWithClaims(jwt.SigningMethodNone, payload)
+    token, err := jwtToken.SignedString(jwt.UnsafeAllowNoneSignatureType)
+    require.NoError(t, err)
+
+    maker, err := NewJWTMaker(util.RandomString(32))
+    require.NoError(t, err)
+
+    payload, err = maker.VerifyToken(token)
+    require.Error(t, err)
+    require.EqualError(t, err, ErrInvalidToken.Error())
+    require.Nil(t, payload)
+}
+```
 # Others
 [claims](https://jwt.io/introduction#:~:text=Claims%20are%20statements%20about%20an%20entity%20(typically%2C%20the%20user)%20and%20additional%20data.)
